@@ -70,9 +70,10 @@ This file is also present in the `examples` directory of this repository.
 #### Advanced configuration
 
 You can also name configuration files after a device's 48-bit Bluetooth address
-(often represented like `11:22:33:44:FF:EE`).  When present, these files take
-precedence over files named after the device name, so you can override default
-behavior for specific devices.
+(often represented like `11:22:33:44:FF:EE`, though the filename should have no
+semicolons, like `11223344FFEE`).  When present, these files take precedence
+over files named after the device name, so you can override default behavior
+for specific devices.
 
 The addresses are case insensitive, but behavior is undefined if there are
 collisions.
