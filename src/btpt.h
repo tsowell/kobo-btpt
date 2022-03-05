@@ -26,7 +26,10 @@ class BluetoothPageTurner : public QThread
 	void run() override;
 
 private:
-	bool addDevice(const QString &i, const QString &handler);
+	bool addDevice(
+		const QString &name,
+		const QString &uniq,
+		const QString &handler);
 	bool scanDevices();
 	void learn(Device &device);
 	QFileSystemWatcher watcher;

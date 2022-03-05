@@ -62,7 +62,8 @@ static void invokeMainWindowController(const char *method)
 	}
 }
 
-bool BluetoothPageTurner::addDevice(const QString &uniq, const QString &handler)
+bool BluetoothPageTurner::addDevice(
+	const QString &name, const QString &uniq, const QString &handler)
 {
 	int fd;
 
@@ -70,7 +71,8 @@ bool BluetoothPageTurner::addDevice(const QString &uniq, const QString &handler)
 		return false;
 	}
 
-	QFile cfg(BTPT_DIR + uniq);
+	/* Fall back to device name */
+	QFile cfg(BTPT_DIR + name);
 
 	/* Look for case-insensitive Bluetooth address in BTPT_DIR */
 	QStringList list = QDir(BTPT_DIR).entryList();
@@ -83,7 +85,7 @@ bool BluetoothPageTurner::addDevice(const QString &uniq, const QString &handler)
 
 	if (!cfg.open(QIODevice::ReadOnly | QIODevice::Text)) {
 		nh_log("unable to open %s%s",
-		       BTPT_DIR, uniq.toStdString().c_str());
+		       BTPT_DIR, cfg.fileName().toStdString().c_str());
 		return false;
 	}
 
@@ -191,6 +193,7 @@ bool BluetoothPageTurner::scanDevices()
 	QTextStream in(&text);
 	QString i;
 	QString u;
+	QString n;
 	while (!in.atEnd()) {
 		QString line = in.readLine();
 		QString type = line.section(": ", 0, 0);
@@ -201,6 +204,12 @@ bool BluetoothPageTurner::scanDevices()
 			/* Bluetooth address without the ':'s */
 			u = line.section(": Uniq=", 1);
 			u.remove(':');
+		}
+		else if (type == "N") {
+			/* Bluetooth name without surrounding double-quotes */
+			n = line.section(": Name=", 1);
+			n.chop(1);
+			n.remove(0, 1);
 		}
 		else if (type == "H") {
 			/* Skip if not Bluetooth device */
@@ -215,7 +224,8 @@ bool BluetoothPageTurner::scanDevices()
 				line.section("Handlers=", 1).split(" ");
 			foreach(const QString &handler, handlers) {
 				if (handler.startsWith("event")) {
-					devicesAdded |= addDevice(u, handler);
+					devicesAdded |=
+						addDevice(n, u, handler);
 				}
 			}
 		}

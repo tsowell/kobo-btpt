@@ -20,17 +20,15 @@ device.
 
 You need two pieces of information about a Bluetooth device to configure it:
 
-1. The 48-bit Bluetooth address (often represented like `11:22:33:44:FF:EE`).
-   You can find this in bluetoothctl or the `Uniq` field in
-   `/proc/bus/input/devices`, among other places.
+1. The Bluetooth device name which you can find in the Kobo Bluetooth settings
+   menu.
 
 2. The [Linux Input Subsystem event codes][0] that represent the input events
    you want to use to turn pages.  You can find these using the [evtest][1]
    tool, for example.
 
-Once you have those, create a file under `.btpt` named after the Bluetooth
-address without semicolons (`11223344FFEE` for example).  The file name is case
-insensitive, but behavior is undefined if there are collisions.
+Once you have those, create a configuration file under `.btpt`.  The filename
+should be the exact Bluetooth device name.
 
 The file should have a line for each input mapping in the format:
 
@@ -56,9 +54,9 @@ orientation, so I want Down (65535 on the Y-axis) and the X button to go to the
 previous page, and Up (0 on the Y-axis) and the B button to go to the next
 page.
 
-The physical address is `E4:17:D8:78:F4:FC` (for the purposes of
-demonstration), so the configuration file is `.btpt/e417d878f4fc` with the
-following contents:
+In XInput mode, the device identifies itself as "8BitDo Zero 2 gamepad", so
+the configuration file is `.btpt/8BitDo Zero 2 gamepad` with the following
+contents:
 
 ```
 prevPage EV_ABS ABS_Y 65535
@@ -66,6 +64,18 @@ nextPage EV_ABS ABS_Y 0
 prevPage EV_KEY BTN_NORTH 0
 nextPage EV_KEY BTN_SOUTH 0
 ```
+
+This file is also present in the `examples` directory of this repository.
+
+#### Advanced configuration
+
+You can also name configuration files after a device's 48-bit Bluetooth address
+(often represented like `11:22:33:44:FF:EE`).  When present, these files take
+precedence over files named after the device name, so you can override default
+behavior for specific devices.
+
+The addresses are case insensitive, but behavior is undefined if there are
+collisions.
 
 ## Building from source
 
