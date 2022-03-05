@@ -1,0 +1,4 @@
+prevPage EV_ABS ABS_Y 65535
+nextPage EV_ABS ABS_Y 0
+prevPage EV_KEY BTN_NORTH 0
+nextPage EV_KEY BTN_SOUTH 0

@@ -1,0 +1,14 @@
+# make gitignore
+.kdev4/
+*.kdev4
+.kateconfig
+.vscode/
+.idea/
+.clangd/
+.cache/
+compile_commands.json
+*.tgz
+*.so
+*.moc
+*.o
+src/eventcodes_init.h
