@@ -1,0 +1,12 @@
+# Format:
+# METHOD  TYPE  CODE  VALUE
+#
+# COLUMN DEFINITIONS:
+# 1. METHOD:    The internal Kobo function to call.
+# 2. TYPE:      The Linux Input Event Type. Usually 'EV_KEY' for buttons or 'EV_ABS' for joysticks.
+# 3. CODE:      The specific button code. Examples: KEY_VOLUMEUP, KEY_VOLUMEDOWN, BTN_A, BTN_B
+# 4. VALUE:     The state of the button.
+#               1 = Press (Trigger immediately when button goes down)
+#               0 = Release (Trigger when button is let go)
+# ------------------------------------------------------------------------------
+nextPage EV_KEY KEY_VOLUMEUP 0

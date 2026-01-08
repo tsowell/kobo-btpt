@@ -119,6 +119,19 @@ bool BluetoothPageTurner::addDevice(
 		 */
 
 		QString line = in.readLine();
+
+        /* Support for Comments */
+        /* Remove anything after a '#' character */
+        line = line.section('#', 0, 0);
+
+        /* Remove whitespace from start and end */
+        line = line.trimmed();
+
+        /* If line is now empty, skip it */
+        if (line.isEmpty()) {
+            continue;
+        }
+
 		QList<QString> parts = line.split(" ", QString::SkipEmptyParts);
 		if (parts.size() != 4) {
 			nh_log("invalid config line: %s",
