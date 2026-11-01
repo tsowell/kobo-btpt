@@ -16,6 +16,17 @@ buttons to change pages in the reading view.
 To uninstall it, create a file in `.btpt` called `uninstall` and restart the
 device.
 
+### Firmware 5.x and 6.x (Qt 6)
+
+Kobo firmware 5.x and 6.x is built on Qt 6, and the `KoboRoot.tgz` above will
+not load on it.  Build `Kobo.tgz` for Qt 6 instead (see below), copy it into
+the `.kobo` folder, and eject.  Configuration works the same way.
+
+The Qt 6 build has been tested on a Kobo Libra Colour with firmware
+6.0.279225.  A Kobo firmware update replaces the system files, so reinstall
+`Kobo.tgz` after updating.  On that firmware, the chapter methods are
+`goToNextChapter` and `goToPrevChapter`.
+
 ### Configuration
 
 You need two pieces of information about a Bluetooth device to configure it:
@@ -86,3 +97,26 @@ collisions.
 `make koboroot` builds `KoboRoot.tgz` which can be installed over USB.
 
 Or get pre-built `KoboRoot.tgz` from the release section.
+
+### Qt 6 (firmware 5.x and 6.x)
+
+The Qt 6 build needs a Qt 6 port of NickelHook and a Kobo Qt 6.5.2
+cross-toolchain:
+
+* NickelHook with Qt 6 support is vendored in [Nickelite][2]
+  (`NickelHook/` directory).
+* The toolchain can be built from `toolchain/qt6` on the `qt6-support` branch
+  of [nicoverbruggen/NickelMenu][3], which uses Kobo's published Qt 6.5.2
+  source.
+
+With the toolchain on your `PATH`:
+
+```
+make NH_QT_MAJOR=6 NICKELHOOK=/path/to/Nickelite/NickelHook/ all kobo
+```
+
+This builds `Kobo.tgz`, which installs `libbtpt.so` into
+/usr/local/Kobo/imageformats.
+
+[2]: https://github.com/open-source-arena/Nickelite
+[3]: https://github.com/nicoverbruggen/NickelMenu/tree/qt6-support/toolchain/qt6
