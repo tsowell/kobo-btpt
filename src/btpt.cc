@@ -54,8 +54,10 @@ static void invokeMainWindowController(const char *method)
 	}
 	name = cv->objectName();
 	if (name == "ReadingView") {
-		nh_log(method);
-		QMetaObject::invokeMethod(cv, method, Qt::QueuedConnection);
+		nh_log("%s", method);
+		if (!QMetaObject::invokeMethod(cv, method, Qt::QueuedConnection)) {
+			nh_log("ReadingView has no invokable method %s", method);
+		}
 	}
 	else {
 		nh_log("not reading view");
@@ -119,7 +121,11 @@ bool BluetoothPageTurner::addDevice(
 		 */
 
 		QString line = in.readLine();
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+		QList<QString> parts = line.split(" ", Qt::SkipEmptyParts);
+#else
 		QList<QString> parts = line.split(" ", QString::SkipEmptyParts);
+#endif
 		if (parts.size() != 4) {
 			nh_log("invalid config line: %s",
 			       line.toStdString().c_str());
@@ -344,9 +350,9 @@ void BluetoothPageTurner::run()
 					emit notify();
 
 					/* Invoke the configured method */
-					const char *method = pair.second
-						.toStdString().c_str();
-					invokeMainWindowController(method);
+					QByteArray method = pair.second.toLatin1();
+					invokeMainWindowController(
+						method.constData());
 				}
 			}
 
@@ -391,7 +397,7 @@ static int btpt_init()
 static struct nh_info btpt_info = {
 	.name           = "BluetoothPageTurner",
 	.desc           = "Turn pages with Bluetooth device",
-	.uninstall_flag = BTPT_DIR "/uninstall",
+	.uninstall_flag = BTPT_DIR "uninstall",
 };
 
 static struct nh_hook btpt_hook[] = {
