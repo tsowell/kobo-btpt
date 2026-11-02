@@ -15,7 +15,7 @@ override MOCS += src/btpt.h
 
 override GENERATED += src/eventcodes_init.h
 
-src/eventcodes.o: src/eventcodes_init.h
+src/eventcodes.o: | src/eventcodes_init.h
 
 # Use the header the target compiler sees, not the build host's.
 src/eventcodes_init.h:
