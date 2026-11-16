@@ -23,6 +23,10 @@ class BluetoothPageTurner : public QThread
 {
 	Q_OBJECT
 
+public:
+	BluetoothPageTurner();
+
+protected:
 	void run() override;
 
 private:
@@ -31,12 +35,11 @@ private:
 		const QString &uniq,
 		const QString &handler);
 	bool scanDevices();
-	void learn(Device &device);
 	QFileSystemWatcher watcher;
 	QMap<QString, Device> devices;
 	QMutex mutex;
 	QWaitCondition newDevice;
-	int deviceChanges = 0;
+	int deviceChanges = 1;
 
 public slots:
 	void directoryChanged(const QString &path);

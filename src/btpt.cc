@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <cstddef>
 #include <cstdlib>
 #include <sys/stat.h>
@@ -54,12 +55,33 @@ static void invokeMainWindowController(const char *method)
 	}
 	name = cv->objectName();
 	if (name == "ReadingView") {
-		nh_log(method);
-		QMetaObject::invokeMethod(cv, method, Qt::QueuedConnection);
+		nh_log("%s", method);
+		if (!QMetaObject::invokeMethod(cv, method, Qt::QueuedConnection)) {
+			const char *fallback = NULL;
+			if (strcmp(method, "nextChapter") == 0) {
+				fallback = "goToNextChapter";
+			} else if (strcmp(method, "prevChapter") == 0) {
+				fallback = "goToPrevChapter";
+			}
+			if (!fallback ||
+			    !QMetaObject::invokeMethod(cv, fallback, Qt::QueuedConnection)) {
+				nh_log("ReadingView has no invokable method %s", method);
+			}
+		}
 	}
 	else {
 		nh_log("not reading view");
 	}
+}
+
+BluetoothPageTurner::BluetoothPageTurner()
+{
+	/* FileSystemWatcher will increment deviceChanges and wake us up when
+	 * /dev/input changes */
+	QObject::connect(
+		&watcher, &QFileSystemWatcher::directoryChanged,
+		this, &BluetoothPageTurner::directoryChanged);
+	watcher.addPath("/dev/input");
 }
 
 bool BluetoothPageTurner::addDevice(
@@ -67,7 +89,7 @@ bool BluetoothPageTurner::addDevice(
 {
 	int fd;
 
-	if (devices.contains(uniq)) {
+	if (devices.contains(handler)) {
 		return false;
 	}
 
@@ -75,36 +97,27 @@ bool BluetoothPageTurner::addDevice(
 	QFile cfg(BTPT_DIR + name);
 
 	/* Look for case-insensitive Bluetooth address in BTPT_DIR */
-	QStringList list = QDir(BTPT_DIR).entryList();
-	for (int i = 0; i < list.size(); ++i) {
-		QString filename = list.at(i);
-		if (filename.toLower() == uniq.toLower()) {
-			cfg.setFileName(BTPT_DIR + filename);
+	if (!uniq.isEmpty()) {
+		QStringList list = QDir(BTPT_DIR).entryList(QDir::Files);
+		for (int i = 0; i < list.size(); ++i) {
+			QString filename = list.at(i);
+			if (filename.toLower() == uniq.toLower()) {
+				cfg.setFileName(BTPT_DIR + filename);
+			}
 		}
 	}
 
 	if (!cfg.open(QIODevice::ReadOnly | QIODevice::Text)) {
-		nh_log("unable to open %s%s",
-		       BTPT_DIR, cfg.fileName().toStdString().c_str());
+		nh_log("unable to open %s",
+		       cfg.fileName().toStdString().c_str());
 		return false;
 	}
-
-	QString path = "/dev/input/" + handler;
-	fd = open(path.toStdString().c_str(), O_RDONLY | O_NONBLOCK);
-	if (fd < 0) {
-		nh_log("error opening /dev/input/%s",
-		       path.toStdString().c_str());
-		return false;
-	}
-
-	/* Found a config file and a /dev/input handler, so configure device */
-	Device &device = devices[uniq];
-	device.fd = fd;
-	device.cfg.clear();
 
 	QByteArray text = cfg.readAll();
 	cfg.close();
 	QTextStream in(&text);
+
+	QList<QPair<struct input_event, QString>> parsedCfg;
 
 	while (!in.atEnd()) {
 		/* Configuration file format is, one per line:
@@ -119,11 +132,23 @@ bool BluetoothPageTurner::addDevice(
 		 */
 
 		QString line = in.readLine();
+
+		/* Support comments starting with '#' and blank lines */
+		line = line.section('#', 0, 0);
+		line.replace('\t', ' ');
+		line = line.trimmed();
+		if (line.isEmpty()) {
+			continue;
+		}
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+		QList<QString> parts = line.split(" ", Qt::SkipEmptyParts);
+#else
 		QList<QString> parts = line.split(" ", QString::SkipEmptyParts);
+#endif
 		if (parts.size() != 4) {
 			nh_log("invalid config line: %s",
 			       line.toStdString().c_str());
-			devices.remove(uniq);
 			return false;
 		}
 
@@ -134,7 +159,6 @@ bool BluetoothPageTurner::addDevice(
 		if (!ok) {
 			nh_log("invalid type: %s",
 			       parts[1].toStdString().c_str());
-			devices.remove(uniq);
 			return false;
 		}
 
@@ -142,7 +166,6 @@ bool BluetoothPageTurner::addDevice(
 		if (!ok) {
 			nh_log("invalid code: %s",
 			       parts[2].toStdString().c_str());
-			devices.remove(uniq);
 			return false;
 		}
 
@@ -150,16 +173,42 @@ bool BluetoothPageTurner::addDevice(
 		if (!ok) {
 			nh_log("invalid value: %s",
 			       parts[3].toStdString().c_str());
-			devices.remove(uniq);
 			return false;
 		}
 
 		QPair<struct input_event, QString> map(event, parts[0]);
-		device.cfg.append(map);
+		parsedCfg.append(map);
 	}
 
-	nh_log("acquired device %s: %s",
+	if (parsedCfg.isEmpty()) {
+		nh_log("empty config file: %s",
+		       cfg.fileName().toStdString().c_str());
+		return false;
+	}
+
+	QString path = "/dev/input/" + handler;
+	fd = open(path.toStdString().c_str(), O_RDONLY | O_NONBLOCK);
+	if (fd < 0) {
+		nh_log("error opening %s",
+		       path.toStdString().c_str());
+		return false;
+	}
+
+	if (fd >= FD_SETSIZE) {
+		nh_log("fd %d exceeds FD_SETSIZE for %s",
+		       fd, path.toStdString().c_str());
+		close(fd);
+		return false;
+	}
+
+	/* Found a config file and a /dev/input handler, so configure device */
+	Device &device = devices[handler];
+	device.fd = fd;
+	device.cfg = parsedCfg;
+
+	nh_log("acquired device %s (%s): %s",
 	       handler.toStdString().c_str(),
+	       name.toStdString().c_str(),
 	       uniq.toStdString().c_str());
 
 	return true;
@@ -199,6 +248,8 @@ bool BluetoothPageTurner::scanDevices()
 		QString type = line.section(": ", 0, 0);
 		if (type == "I") {
 			i = line.section(": ", 1);
+			u.clear();
+			n.clear();
 		}
 		else if (type == "U") {
 			/* Bluetooth address without the ':'s */
@@ -208,8 +259,10 @@ bool BluetoothPageTurner::scanDevices()
 		else if (type == "N") {
 			/* Bluetooth name without surrounding double-quotes */
 			n = line.section(": Name=", 1);
-			n.chop(1);
-			n.remove(0, 1);
+			if (n.startsWith('"') && n.endsWith('"') && n.size() >= 2) {
+				n.chop(1);
+				n.remove(0, 1);
+			}
 		}
 		else if (type == "H") {
 			/* Skip if not Bluetooth device */
@@ -220,8 +273,13 @@ bool BluetoothPageTurner::scanDevices()
 
 			/* Configure the device */
 			nh_log("found %s", i.toStdString().c_str());
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
 			QList<QString> handlers =
-				line.section("Handlers=", 1).split(" ");
+				line.section("Handlers=", 1).split(" ", Qt::SkipEmptyParts);
+#else
+			QList<QString> handlers =
+				line.section("Handlers=", 1).split(" ", QString::SkipEmptyParts);
+#endif
 			foreach(const QString &handler, handlers) {
 				if (handler.startsWith("event")) {
 					devicesAdded |=
@@ -246,13 +304,6 @@ void BluetoothPageTurner::run()
 
 	nh_log("starting");
 
-	/* FileSystemWatcher will increment devicesChanges and wake us up when
-	 * /dev/input changes */
-	QObject::connect(
-		&watcher, &QFileSystemWatcher::directoryChanged,
-		this, &BluetoothPageTurner::directoryChanged);
-	watcher.addPath("/dev/input");
-
 	while (1) {
 		struct input_event e;
 		int ret;
@@ -271,7 +322,7 @@ void BluetoothPageTurner::run()
 		else if (deviceChanges > 0) {
 			deviceChanges = 0;
 			mutex.unlock();
-			if (!scanDevices()) {
+			if (!scanDevices() && devices.empty()) {
 				continue;
 			}
 		}
@@ -281,14 +332,19 @@ void BluetoothPageTurner::run()
 
 		/* Bluetooth heartbeat to prevent Bluetooth from turning off */
 		clock_gettime(CLOCK_MONOTONIC, &now);
-		if (last_event.tv_sec > 0 &&
+		if (BluetoothHeartbeat && BluetoothHeartbeat_beat &&
+		    last_event.tv_sec > 0 &&
 		    now.tv_sec - last_event.tv_sec < BLUETOOTH_TIMEOUT) {
 			if (bluetoothHeartbeat == NULL) {
-				bluetoothHeartbeat = alloca(1024);
-				new(bluetoothHeartbeat) QObject();
-				BluetoothHeartbeat(bluetoothHeartbeat, 0);
+				bluetoothHeartbeat = calloc(1, 1024);
+				if (bluetoothHeartbeat != NULL) {
+					new(bluetoothHeartbeat) QObject();
+					BluetoothHeartbeat(bluetoothHeartbeat, 0);
+				}
 			}
-			BluetoothHeartbeat_beat(bluetoothHeartbeat);
+			if (bluetoothHeartbeat != NULL) {
+				BluetoothHeartbeat_beat(bluetoothHeartbeat);
+			}
 		}
 
 		/* Poll devices for input events */
@@ -296,12 +352,23 @@ void BluetoothPageTurner::run()
 		tv.tv_usec = 0;
 
 		FD_ZERO(&rfds);
+		int maxfd = -1;
 
-		foreach(const Device &device, devices.values()) {
-			FD_SET(device.fd, &rfds);
+		for (auto it = devices.constBegin(); it != devices.constEnd(); ++it) {
+			int fd = it.value().fd;
+			if (fd >= 0 && fd < FD_SETSIZE) {
+				FD_SET(fd, &rfds);
+				if (fd > maxfd) {
+					maxfd = fd;
+				}
+			}
 		}
 
-		ret = select(FD_SETSIZE, &rfds, NULL, NULL, &tv);
+		if (maxfd < 0) {
+			continue;
+		}
+
+		ret = select(maxfd + 1, &rfds, NULL, NULL, &tv);
 		if (ret <= 0) {
 			continue;
 		}
@@ -317,7 +384,12 @@ void BluetoothPageTurner::run()
 
 			ret = read(device.fd, &e, sizeof(e));
 			if (ret < (int)sizeof(e)) {
-				nh_log("lost device");
+				if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+					it++;
+					continue;
+				}
+				nh_log("lost device %s", it.key().toStdString().c_str());
+				close(device.fd);
 				it = devices.erase(it);
 				continue;
 			}
@@ -325,7 +397,8 @@ void BluetoothPageTurner::run()
 			if (e.type == 0x00 &&
 			    e.code == 0x00 &&
 			    e.value == 0x0001) {
-				nh_log("lost device");
+				nh_log("lost device %s", it.key().toStdString().c_str());
+				close(device.fd);
 				it = devices.erase(it);
 				continue;
 			}
@@ -344,9 +417,9 @@ void BluetoothPageTurner::run()
 					emit notify();
 
 					/* Invoke the configured method */
-					const char *method = pair.second
-						.toStdString().c_str();
-					invokeMainWindowController(method);
+					QByteArray method = pair.second.toLatin1();
+					invokeMainWindowController(
+						method.constData());
 				}
 			}
 
@@ -357,12 +430,17 @@ void BluetoothPageTurner::run()
 
 void TimeLastUsedUpdater::notify()
 {
+	if (!TimeEvent_eventType || !PowerManager_sharedInstance || !PowerManager_filter) {
+		return;
+	}
+
 	/* Update PowerManager::timeLastUsed to prevent sleep */
 	QEvent timeEvent(TimeEvent_eventType());
 
 	QObject *pm = PowerManager_sharedInstance();
 	if (pm == NULL) {
 		nh_log("invalid PowerManager");
+		return;
 	}
 
 	PowerManager_filter(pm, this, &timeEvent);
@@ -391,7 +469,7 @@ static int btpt_init()
 static struct nh_info btpt_info = {
 	.name           = "BluetoothPageTurner",
 	.desc           = "Turn pages with Bluetooth device",
-	.uninstall_flag = BTPT_DIR "/uninstall",
+	.uninstall_flag = BTPT_DIR "uninstall",
 };
 
 static struct nh_hook btpt_hook[] = {
@@ -401,11 +479,15 @@ static struct nh_hook btpt_hook[] = {
 static struct nh_dlsym btpt_dlsym[] = {
 	{
 		.name = "_ZN18BluetoothHeartbeatC1Ex",
-		.out = nh_symoutptr(BluetoothHeartbeat)
+		.out = nh_symoutptr(BluetoothHeartbeat),
+		.desc = NULL,
+		.optional = true
 	},
 	{
 		.name = "_ZN18BluetoothHeartbeat4beatEv",
-		.out = nh_symoutptr(BluetoothHeartbeat_beat)
+		.out = nh_symoutptr(BluetoothHeartbeat_beat),
+		.desc = NULL,
+		.optional = true
 	},
 	{
 		.name = "_ZN20MainWindowController14sharedInstanceEv",
@@ -417,15 +499,21 @@ static struct nh_dlsym btpt_dlsym[] = {
 	},
 	{
 		.name = "_ZN9TimeEvent9eventTypeEv",
-		.out = nh_symoutptr(TimeEvent_eventType)
+		.out = nh_symoutptr(TimeEvent_eventType),
+		.desc = NULL,
+		.optional = true
 	},
 	{
 		.name = "_ZN12PowerManager14sharedInstanceEv",
-		.out = nh_symoutptr(PowerManager_sharedInstance)
+		.out = nh_symoutptr(PowerManager_sharedInstance),
+		.desc = NULL,
+		.optional = true
 	},
 	{
 		.name = "_ZN12PowerManager6filterEP7QObjectP6QEvent",
-		.out = nh_symoutptr(PowerManager_filter)
+		.out = nh_symoutptr(PowerManager_filter),
+		.desc = NULL,
+		.optional = true
 	},
 	{0},
 };
