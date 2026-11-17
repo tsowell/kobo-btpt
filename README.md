@@ -14,6 +14,14 @@ and **Kobo Libra 2**.
 - **Multi-Plugin Compatibility (`NickelHook`)**: Adds unique plugin metadata (`nh.btpt`) so `libbtpt.so` coexists cleanly with other mods (e.g., NickelMenu, NickelClock) and uninstalls reliably.
 - **Multi-Interface Bluetooth Device Support**: Supports Bluetooth rings and controllers that register multiple `/dev/input/eventX` handlers under the same Bluetooth address.
 - **Resilient Symbol Resolution**: Non-essential internal firmware symbols (`BluetoothHeartbeat`, `PowerManager`, `TimeEvent`) are resolved optionally with null checks so firmware changes do not break page turning.
+- **Extended Button Actions & Full UI Navigation**:
+  - Supports **2D spatial UI navigation** (`navLeft`, `navRight`, `navUp`, `navDown`), item activation (`ok`), and context-aware menu/back (`menu` / `backOrMenu`) across the reading menu, modal dialogs, Home, My Books, and Settings with a visual highlight border.
+  - While reading with the menu closed, directional keys turn pages and `ok` closes the book (`closeBook`, `back`).
+  - Also supports going straight to Home (`home`), explicit `openMenu`/`closeMenu`, and chapter navigation (`nextChapter`/`prevChapter`).
+- **Touch/Digitizer Remote Reliability (`BLE-M3`)**:
+  - Added 200 ms input debounce to prevent accidental double triggers.
+  - Synthesizes repeated `EV_ABS` button presses on `BTN_TOUCH` + `SYN_REPORT` when a remote omits unchanged `EV_ABS` coordinates (e.g., repeated middle-button presses on `BLE-M3`).
+  - Optional `/mnt/onboard/.btpt/debug` flag to log unmatched events to `/mnt/onboard/.btpt/events.log`, plus [`capture-events.ps1`](./capture-events.ps1) for inspecting Windows Raw Input reports.
 - **Bug Fixes & Stability**:
   - Fixed a use-after-free bug when invoking `ReadingView` methods with longer names (such as `goToNextChapter`).
   - Automatic fallback from `nextChapter` / `prevChapter` to `goToNextChapter` / `goToPrevChapter`.
@@ -70,9 +78,14 @@ The file should have a line for each input mapping in the format:
 METHOD TYPE CODE VALUE
 ```
 
-- `METHOD` is the name of the `ReadingView` method to invoke:
-  - `prevPage` and `nextPage` turn the pages.
+- `METHOD` is the name of the action or `ReadingView` method to invoke:
+  - `prevPage` and `nextPage` turn the pages (and step through highlighted UI items when a menu or non-reading screen is active).
+  - `navLeft`, `navRight`, `navUp`, and `navDown` turn pages while reading (`navLeft`/`navUp` -> `nextPage`, `navRight`/`navDown` -> `prevPage`) and perform 2D spatial navigation across buttons/items when the reading menu, a dialog, or a non-reading view (Home, My Books, Settings) is active.
+  - `ok` activates the currently highlighted UI item when navigating menus/views, or closes the book when reading with the menu closed.
   - `goToNextChapter` (or `nextChapter`) and `prevChapter` navigate chapters.
+  - `closeBook` (or `back` / `goBack` / `backRequested`) closes the current book and returns to the previous menu (e.g., My Books or Home).
+  - `home` (or `mainMenu` / `popToFirstView`) closes any active dialogs/books and returns directly to the Home screen.
+  - `menu` (or `toggleMenu` / `readingMenu` / `backOrMenu`) toggles the reading menu inside a book, closes active dialogs, or returns to the previous screen (`popView`) when outside a book. `openMenu` (`onHeaderTapped`) and `closeMenu` (`closeFooterMenu`) explicitly open/close the reading menu.
 - `TYPE`, `CODE`, and `VALUE` specify the input event values to match. C-style
   integers in decimal, octal, or hexadecimal are accepted, and so are `#define`
   names from `<linux/input-event-codes.h>`.
